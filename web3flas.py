@@ -3,10 +3,18 @@ from web3 import Web3
 import json
 from Crypto.Cipher import AES
 import base64
-from Crypto.Util.Padding import pad
+from Crypto.Util.Padding import pad ,unpad
+from flasgger import Swagger ,swag_from
+import numpy as np
+from PIL import Image
+from skimage.exposure import equalize_adapthist
+import io
+from feature_extractor import extract_feature
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
 
 app = Flask(__name__)
-
+swagger=Swagger(app)
 # Connect to Ganache (or another Ethereum node)
 ganache_url = "http://127.0.0.1:7545"  # Ganache default URL
 web3 = Web3(Web3.HTTPProvider(ganache_url))
@@ -20,6 +28,50 @@ if not web3.is_connected():
 contract_abi = json.loads('''
  [
     {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "uid",
+          "type": "string"
+        },
+        {
+          "indexed": false,
+          "internalType": "bool",
+          "name": "exists",
+          "type": "bool"
+        },
+        {
+          "indexed": false,
+          "internalType": "bytes",
+          "name": "featureVector",
+          "type": "bytes"
+        }
+      ],
+      "name": "UserAuthenticated",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "uid",
+          "type": "string"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "owner",
+          "type": "address"
+        }
+      ],
+      "name": "UserEnrolled",
+      "type": "event"
+    },
+    {
       "inputs": [
         {
           "internalType": "string",
@@ -30,9 +82,9 @@ contract_abi = json.loads('''
       "name": "biometricTemplates",
       "outputs": [
         {
-          "internalType": "bytes",
-          "name": "encryptedTemplate",
-          "type": "bytes"
+          "internalType": "string",
+          "name": "encryptedFeatureVector",
+          "type": "string"
         },
         {
           "internalType": "address",
@@ -52,9 +104,9 @@ contract_abi = json.loads('''
           "type": "string"
         },
         {
-          "internalType": "bytes",
-          "name": "encryptedTemplate",
-          "type": "bytes"
+          "internalType": "string",
+          "name": "encryptedFeatureVector",
+          "type": "string"
         }
       ],
       "name": "enrollUser",
@@ -68,11 +120,6 @@ contract_abi = json.loads('''
           "internalType": "string",
           "name": "uid",
           "type": "string"
-        },
-        {
-          "internalType": "bytes",
-          "name": "queryTemplate",
-          "type": "bytes"
         }
       ],
       "name": "authenticateUser",
@@ -81,6 +128,11 @@ contract_abi = json.loads('''
           "internalType": "bool",
           "name": "",
           "type": "bool"
+        },
+        {
+          "internalType": "string",
+          "name": "",
+          "type": "string"
         }
       ],
       "stateMutability": "view",
@@ -90,40 +142,122 @@ contract_abi = json.loads('''
   ]''')
 
 # Contract address (replace with the actual deployed address)
-contract_address = "0xe1c7A005Fc63591B524b149f74e645beBD812C12"  # Replace with your contract address
+contract_address = "0xA2000867abc765e1B2f5ed376fdf234354842079"  # Replace with your contract address
 
 # Create the contract instance
 contract = web3.eth.contract(address=contract_address, abi=contract_abi)
 
 # Set up your account and private key
-account = "0x9f409a9B6497b34F2D1719198c127087d1e53424"  # Your Ganache account address
+account = "0xb8272E3BAb9e740f74Cf688c77E952De52fCd512"  # Your Ganache account address
 
 # Set the private key (for signing transactions)
-private_key = "0x9fdad94c7854d069334092b0d3e993b6c4f026bec80a2bafe470411bd2721c5f"  # Replace with your private key from Ganache
+private_key = "0x70002d6af37bc76a698abd8f1e402f26744c1822daa0395ba69975817e5714eb"  # Replace with your private key from Ganache
 
 aes_key = bytes.fromhex('603deb1015ca71be2b73aef0857d7781f19bff5a1b6a9d82e5a308d6d44323b1')
 aes_iv = bytes.fromhex('000102030405060708090a0b0c0d0e0f')
+def float_to_fixed(value, scale=10**6):
+    return int(value * scale)
 
+key = [0xAB] * 128  # XOR encryption key
+
+def xor_encrypt(data, key):
+    scaled_data = np.array(data, dtype=np.uint)  # Enforce 8-bit integers
+    print("Scaled Data:", scaled_data)  # Debugging output
+    x=bytes([scaled_data[i] ^ key[i % len(key)] for i in range(len(scaled_data))])
+    print(x)
+    return x.hex()
 # AES encryption method (use the same key and IV for both encryption and decryption)
-def encrypt_aes(data, key, iv):
-    cipher = AES.new(key, AES.MODE_CBC, iv)
-    encrypted = cipher.encrypt(pad(data.encode('utf-8'), AES.block_size))
-    return base64.b64encode(encrypted).decode('utf-8')
+def float_vector_to_bytes(vector):
+    """Convert floating-point feature vector to bytes"""
+    return np.array(vector, dtype=np.float32).tobytes()
+
+def bytes_to_float_vector(byte_data):
+    """Convert bytes back to floating-point feature vector"""
+    return np.frombuffer(byte_data, dtype=np.float32)
+
+def encrypt_aes(data):
+    cipher = AES.new(aes_key, AES.MODE_CBC, aes_iv)
+    encrypted = cipher.encrypt(pad(data, AES.block_size))
+    return encrypted.hex()
+
+def decrypt_aes(encrypted_data):
+    cipher = AES.new(aes_key, AES.MODE_CBC, aes_iv)
+    decrypted = unpad(cipher.decrypt(bytes.fromhex(encrypted_data)), AES.block_size)
+    return decrypted
+def preprocess_image(image, box=(280, 140, 410, 500), width=224, height=224):
+ 
+    crop = image.crop(box)
+    crop = crop.rotate(90, expand=True)
+    crop = crop.resize((width, height))
+
+    # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
+    img_array = np.asarray(crop)
+    clahe_img = equalize_adapthist(img_array, clip_limit=0.03)  # Adjust clip_limit as needed
+
+    return clahe_img
 
 # Route 1: Enroll User with UID and encrypted template
 @app.route('/enroll', methods=['POST'])
+@swag_from({
+    "summary": "Enroll a user",
+    "tags": ["User Enrollment"],
+    "consumes": ["multipart/form-data"],
+    "parameters": [
+        {
+            "name": "uid",
+            "in": "formData",
+            "required": True,
+            "type": "string",
+            "example": "user123"
+        },
+        {
+            "name": "image",
+            "in": "formData",
+            "required": True,
+            "type": "file"
+        }
+    ],
+    "responses": {
+        "200": {
+            "description": "User successfully enrolled",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "example": "User enrolled"},
+                    "txHash": {"type": "string", "example": "0xabc123..."}
+                }
+            }
+        },
+        "400": {
+            "description": "Error occurred",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "error": {"type": "string", "example": "No image provided"}
+                }
+            }
+        }
+    }
+})
 def enroll_user():
     try:
-        # Get UID and plain biometric data from the request
-        uid = request.json['uid']
-        plain_template = request.json['template']
+        uid = request.form['uid']
+        if 'image' not in request.files:
+            return jsonify({"error": "No image provided"}), 400
+
+        image_file = request.files['image']
+        image = Image.open(io.BytesIO(image_file.read()))
+
+        processed_image = preprocess_image(image)
+        feature_vector = extract_feature(processed_image)  # 128 floating point values
+
+        feature_bytes = float_vector_to_bytes(feature_vector)  # Convert float to bytes
+        encrypted_template = encrypt_aes(feature_bytes)  # Encrypt bytes
+        '''if isinstance(encrypted_template, str):  
+          encrypted_template = encrypted_template.encode('utf-8')  # Ensure it's bytes'''
         
-        # Encrypt the template (using the hardcoded AES key and IV)
-        encrypted_template = encrypt_aes(plain_template, aes_key, aes_iv)
-        
-        # Call the contract to enroll the user with UID and encrypted template
-        transaction = contract.functions.enrollUser(uid, encrypted_template.encode('utf-8')).build_transaction({
-            'chainId': 1337,  # Ganache default chainId
+        transaction = contract.functions.enrollUser(uid, encrypted_template).build_transaction({
+            'chainId': 1337,
             'gas': 6721975,
             'gasPrice': web3.to_wei('20', 'gwei'),
             'nonce': web3.eth.get_transaction_count(account),
@@ -137,26 +271,77 @@ def enroll_user():
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
-
 # Route 2: Authenticate User with UID and query template
 @app.route('/authenticate', methods=['POST'])
+@swag_from({
+    "summary": "Authenticate a user",
+    "tags": ["User Authentication"],
+    "consumes": ["multipart/form-data"],
+    "parameters": [
+        {
+            "name": "uid",
+            "in": "formData",
+            "required": True,
+            "type": "string",
+            "example": "user123"
+        },
+        {
+            "name": "image",
+            "in": "formData",
+            "required": True,
+            "type": "file"
+        }
+    ],
+    "responses": {
+        "200": {
+            "description": "Authentication result",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "authenticationResult": {"type": "string", "example": "User authenticated successfully"}
+                }
+            }
+        },
+        "400": {
+            "description": "Error occurred",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "error": {"type": "string", "example": "No image provided"}
+                }
+            }
+        }
+    }
+})
 def authenticate_user():
     try:
-        # Get UID and plain biometric query data from the request
-        uid = request.json['uid']
-        plain_query_template = request.json['queryTemplate']
-        
-        # Encrypt the query template (using the hardcoded AES key and IV)
-        encrypted_query_template = encrypt_aes(plain_query_template, aes_key, aes_iv)
-        
-        # Call the contract to authenticate the user with UID and encrypted query template
-        is_authenticated = contract.functions.authenticateUser(uid, encrypted_query_template.encode('utf-8')).call()
+        uid = request.form['uid']
+        if 'image' not in request.files:
+            return jsonify({"error": "No image provided"}), 400
 
-        return jsonify({"authenticationResult": is_authenticated}), 200
+        image_file = request.files['image']
+        image = Image.open(io.BytesIO(image_file.read()))
+
+        processed_image = preprocess_image(image)
+        feature_vector = extract_feature(processed_image)
+
+        is_enrolled, encrypted_stored_template = contract.functions.authenticateUser(uid).call()
+
+        if not is_enrolled:
+            return jsonify({"authenticationResult": "User does not exist"}), 400
+
+        stored_feature_bytes = decrypt_aes(encrypted_stored_template)  # Decrypt bytes
+        stored_feature_vector = bytes_to_float_vector(stored_feature_bytes)  # Convert to float vector
+
+        similarity_score = np.dot(feature_vector, stored_feature_vector) / (np.linalg.norm(feature_vector) * np.linalg.norm(stored_feature_vector)) * 100
+        print("Similarity score:", similarity_score)
+        if similarity_score >= 95:
+            return jsonify({"authenticationResult": "User authenticated successfully"}), 200
+        else:
+            return jsonify({"authenticationResult": "Authentication failed"}), 400
 
     except Exception as e:
         return jsonify({"error": str(e)}), 400
-
 
 if __name__ == '__main__':
     app.run(debug=True)
