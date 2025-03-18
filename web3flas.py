@@ -11,8 +11,22 @@ from skimage.exposure import equalize_adapthist
 import io
 from feature_extractor import extract_feature
 import ssl
+import gc
 import os
 ssl._create_default_https_context = ssl._create_unverified_context
+import psutil
+def get_memory_usage():
+    process = psutil.Process(os.getpid())  # Get current process
+    mem_info = process.memory_info()  # Get memory usage details
+    
+    rss_memory = mem_info.rss / (1024 ** 2)  # Resident Set Size (RAM usage) in MB
+    vms_memory = mem_info.vms / (1024 ** 2)  # Virtual Memory Size in MB
+    
+    print(f"RAM Used by this app (RSS): {rss_memory:.2f} MB")
+    print(f"Virtual Memory Used (VMS): {vms_memory:.2f} MB")
+
+
+# Run the function
 
 app = Flask(__name__)
 swagger=Swagger(app)
@@ -165,10 +179,10 @@ def xor_encrypt(data, key):
     print(x)
     return x.hex()
 def float_vector_to_bytes(vector):
-    return np.array(vector, dtype=np.float32).flatten().tobytes()
+    return np.array(vector, dtype=np.float16).flatten().tobytes()
 
 def bytes_to_float_vector(byte_data):
-    return np.frombuffer(byte_data, dtype=np.float32).flatten()
+    return np.frombuffer(byte_data, dtype=np.float16).flatten()
 
 # AES encyrp method (keey keep same for encrypt and decrypt)
 
@@ -181,15 +195,14 @@ def decrypt_aes(encrypted_data):
     cipher = AES.new(aes_key, AES.MODE_CBC, aes_iv)
     decrypted = unpad(cipher.decrypt(bytes.fromhex(encrypted_data)), AES.block_size)
     return decrypted
-def preprocess_image(image, box=(280, 140, 410, 500), width=224, height=224):
- 
+def preprocess_image(image, box=(280, 140, 410, 500), width=128, height=128):
     crop = image.crop(box)
     crop = crop.rotate(90, expand=True)
     crop = crop.resize((width, height))
-  #clahe
-    img_array = np.asarray(crop)
-    clahe_img = equalize_adapthist(img_array, clip_limit=0.03)  # Adjust clip_limit as needed
-
+    
+    img_array = np.asarray(crop, dtype=np.uint8)  # Use uint8 (less memory than float32)
+    clahe_img = equalize_adapthist(img_array, clip_limit=0.02)  # Reduce clip_limit
+    
     return clahe_img
 
 # Route 1: Enroll User with UID and encrypted template
@@ -263,11 +276,14 @@ def enroll_user():
 
         signed_transaction = web3.eth.account.sign_transaction(transaction, private_key)
         tx_hash = web3.eth.send_raw_transaction(signed_transaction.raw_transaction)
-
+        get_memory_usage()
+        del image, feature_vector, feature_bytes  # Free memory
+        gc.collect()
         return jsonify({"status": "User enrolled", "txHash": tx_hash.hex(),"feature vector":encrypted_template}), 200
 
     except Exception as e:
         return {"error": str(e)}, 400
+  
 
 # Route 2: Authenticate User with UID and query template
 @app.route('/authenticate', methods=['POST'])
@@ -324,7 +340,7 @@ def authenticate_user():
         feature_vector = extract_feature(processed_image)
         print("Feature Vector auth :", feature_vector.tolist())
 
-        is_enrolled, encrypted_stored_template = contract.functions.authenticateUser(uid).call()
+        is_enrolled, encrypted_stored_template = contract.functions.authenticateUser(uid).call({'form':account})
 
         if not is_enrolled:
             return jsonify({"authenticationResult": "User does not exist"}), 400
@@ -336,6 +352,8 @@ def authenticate_user():
         print("stored_feature_vector:", stored_feature_vector.tolist()) 
         similarity_score = np.dot(feature_vector, stored_feature_vector) / (np.linalg.norm(feature_vector) * np.linalg.norm(stored_feature_vector)) * 100
         print("Similarity score:", similarity_score)
+        get_memory_usage()
+
         if similarity_score >= 92:
             return jsonify({"authenticationResult": "User authenticated successfully"}), 200
         else:
@@ -343,7 +361,6 @@ def authenticate_user():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 400
-
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8000))  # Default to 8000 if PORT is not set
     app.run(host="0.0.0.0", port=port)
