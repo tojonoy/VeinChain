@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 from web3 import Web3
 import json
 from Crypto.Cipher import AES
-import base64
+#import base64
 from Crypto.Util.Padding import pad ,unpad
 from flasgger import Swagger ,swag_from
 import numpy as np
@@ -14,17 +14,6 @@ import ssl
 import gc
 import os
 ssl._create_default_https_context = ssl._create_unverified_context
-import psutil
-def get_memory_usage():
-    process = psutil.Process(os.getpid())  # Get current process
-    mem_info = process.memory_info()  # Get memory usage details
-    
-    rss_memory = mem_info.rss / (1024 ** 2)  # Resident Set Size (RAM usage) in MB
-    vms_memory = mem_info.vms / (1024 ** 2)  # Virtual Memory Size in MB
-    
-    print(f"RAM Used by this app (RSS): {rss_memory:.2f} MB")
-    print(f"Virtual Memory Used (VMS): {vms_memory:.2f} MB")
-
 
 # Run the function
 
@@ -179,10 +168,10 @@ def xor_encrypt(data, key):
     print(x)
     return x.hex()
 def float_vector_to_bytes(vector):
-    return np.array(vector, dtype=np.float16).flatten().tobytes()
+    return np.array(vector, dtype=np.float32).flatten().tobytes()
 
 def bytes_to_float_vector(byte_data):
-    return np.frombuffer(byte_data, dtype=np.float16).flatten()
+    return np.frombuffer(byte_data, dtype=np.float32).flatten()
 
 # AES encyrp method (keey keep same for encrypt and decrypt)
 
@@ -276,7 +265,7 @@ def enroll_user():
 
         signed_transaction = web3.eth.account.sign_transaction(transaction, private_key)
         tx_hash = web3.eth.send_raw_transaction(signed_transaction.raw_transaction)
-        get_memory_usage()
+        #get_memory_usage()
         del image, feature_vector, feature_bytes  # Free memory
         gc.collect()
         return jsonify({"status": "User enrolled", "txHash": tx_hash.hex(),"feature vector":encrypted_template}), 200
@@ -340,7 +329,7 @@ def authenticate_user():
         feature_vector = extract_feature(processed_image)
         print("Feature Vector auth :", feature_vector.tolist())
 
-        is_enrolled, encrypted_stored_template = contract.functions.authenticateUser(uid).call({'form':account})
+        is_enrolled, encrypted_stored_template = contract.functions.authenticateUser(uid).call()
 
         if not is_enrolled:
             return jsonify({"authenticationResult": "User does not exist"}), 400
@@ -352,7 +341,7 @@ def authenticate_user():
         print("stored_feature_vector:", stored_feature_vector.tolist()) 
         similarity_score = np.dot(feature_vector, stored_feature_vector) / (np.linalg.norm(feature_vector) * np.linalg.norm(stored_feature_vector)) * 100
         print("Similarity score:", similarity_score)
-        get_memory_usage()
+        #get_memory_usage()
 
         if similarity_score >= 92:
             return jsonify({"authenticationResult": "User authenticated successfully"}), 200
