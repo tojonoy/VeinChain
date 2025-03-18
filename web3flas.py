@@ -13,11 +13,13 @@ from feature_extractor import extract_feature
 import ssl
 import gc
 import os
+from flask_cors import CORS
 ssl._create_default_https_context = ssl._create_unverified_context
 
 # Run the function
 
 app = Flask(__name__)
+CORS(app)  
 swagger=Swagger(app)
 # Connect to Ganache (or another Ethereum node)
 ganache_url = "http://127.0.0.1:7545"  # Ganache default URL
@@ -343,12 +345,14 @@ def authenticate_user():
         print("Similarity score:", similarity_score)
         #get_memory_usage()
 
-        if similarity_score >= 92:
+        if similarity_score >= 90:
             return jsonify({"authenticationResult": "User authenticated successfully"}), 200
         else:
+            print("hi")
             return jsonify({"authenticationResult": "Authentication failed"}), 400
 
     except Exception as e:
+        print(str(e))
         return jsonify({"error": str(e)}), 400
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8000))  # Default to 8000 if PORT is not set
