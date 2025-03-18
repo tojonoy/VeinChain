@@ -11,6 +11,7 @@ from skimage.exposure import equalize_adapthist
 import io
 from feature_extractor import extract_feature
 import ssl
+import os
 ssl._create_default_https_context = ssl._create_unverified_context
 
 app = Flask(__name__)
@@ -344,4 +345,6 @@ def authenticate_user():
         return jsonify({"error": str(e)}), 400
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 8000))  # Default to 8000 if PORT is not set
+    app.run(host="0.0.0.0", port=port,debug=True)
+    #app.run(debug=True)
