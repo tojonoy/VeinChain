@@ -6,12 +6,22 @@ from torchvision.models import resnet50
 from torchvision.models import ResNet50_Weights
 from PIL import Image
 
-# Define device
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# Set random seed for deterministic behavior
+def set_seed(seed=42):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+set_seed()
+
+# Define device (forcing CPU to avoid floating-point variability)
+device = torch.device("cpu")
 
 # Define transformations
 transform = transforms.Compose([
-    transforms.Resize((224, 224)),  # Resize the image to match the ResNet input size
+    transforms.Resize((224, 224), interpolation=Image.LANCZOS),  # Ensure deterministic resizing
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),  # Normalize RGB images
 ])
@@ -22,8 +32,8 @@ model = resnet50(weights=ResNet50_Weights.DEFAULT)
 # Replace the fully connected layer to reduce dimensions to 128
 model.fc = nn.Sequential(
     nn.Linear(2048, 128),  # Reduce to 128 dimensions
-    nn.ReLU(),             # Add non-linearity
-    nn.BatchNorm1d(128)    # Normalize feature vector
+    nn.ReLU(),             
+    nn.BatchNorm1d(128, affine=False)  # Disable affine parameters to keep BN stable
 )
 
 model = model.to(device)
@@ -38,5 +48,5 @@ def extract_feature(image):
 
     with torch.no_grad():
         feature = model(image).cpu().numpy().flatten()
-    
+
     return feature

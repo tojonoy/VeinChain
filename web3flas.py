@@ -141,14 +141,11 @@ contract_abi = json.loads('''
     }
   ]''')
 
-# Contract address (replace with the actual deployed address)
-contract_address = "0xA2000867abc765e1B2f5ed376fdf234354842079"  # Replace with your contract address
-
-# Create the contract instance
+contract_address = "0xc9952216C577bd9BBB47b8dE11AA18Cb5Df2FB8a"  # Replace with your contract address
 contract = web3.eth.contract(address=contract_address, abi=contract_abi)
 
 # Set up your account and private key
-account = "0xb8272E3BAb9e740f74Cf688c77E952De52fCd512"  # Your Ganache account address
+account = "0xb8272E3BAb9e740f74Cf688c77E952De52fCd512"  
 
 # Set the private key (for signing transactions)
 private_key = "0x70002d6af37bc76a698abd8f1e402f26744c1822daa0395ba69975817e5714eb"  # Replace with your private key from Ganache
@@ -166,14 +163,13 @@ def xor_encrypt(data, key):
     x=bytes([scaled_data[i] ^ key[i % len(key)] for i in range(len(scaled_data))])
     print(x)
     return x.hex()
-# AES encryption method (use the same key and IV for both encryption and decryption)
 def float_vector_to_bytes(vector):
-    """Convert floating-point feature vector to bytes"""
-    return np.array(vector, dtype=np.float32).tobytes()
+    return np.array(vector, dtype=np.float32).flatten().tobytes()
 
 def bytes_to_float_vector(byte_data):
-    """Convert bytes back to floating-point feature vector"""
-    return np.frombuffer(byte_data, dtype=np.float32)
+    return np.frombuffer(byte_data, dtype=np.float32).flatten()
+
+# AES encyrp method (keey keep same for encrypt and decrypt)
 
 def encrypt_aes(data):
     cipher = AES.new(aes_key, AES.MODE_CBC, aes_iv)
@@ -189,8 +185,7 @@ def preprocess_image(image, box=(280, 140, 410, 500), width=224, height=224):
     crop = image.crop(box)
     crop = crop.rotate(90, expand=True)
     crop = crop.resize((width, height))
-
-    # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
+  #clahe
     img_array = np.asarray(crop)
     clahe_img = equalize_adapthist(img_array, clip_limit=0.03)  # Adjust clip_limit as needed
 
@@ -251,11 +246,13 @@ def enroll_user():
         processed_image = preprocess_image(image)
         feature_vector = extract_feature(processed_image)  # 128 floating point values
 
-        feature_bytes = float_vector_to_bytes(feature_vector)  # Convert float to bytes
+        feature_bytes = float_vector_to_bytes(feature_vector)
+        print("feature vector:",feature_vector.tolist())
+        print("feature_bytes",feature_bytes)  # Convert float to bytes
         encrypted_template = encrypt_aes(feature_bytes)  # Encrypt bytes
         '''if isinstance(encrypted_template, str):  
           encrypted_template = encrypted_template.encode('utf-8')  # Ensure it's bytes'''
-        
+        print("encrypted_template:", encrypted_template)
         transaction = contract.functions.enrollUser(uid, encrypted_template).build_transaction({
             'chainId': 1337,
             'gas': 6721975,
@@ -266,10 +263,10 @@ def enroll_user():
         signed_transaction = web3.eth.account.sign_transaction(transaction, private_key)
         tx_hash = web3.eth.send_raw_transaction(signed_transaction.raw_transaction)
 
-        return jsonify({"status": "User enrolled", "txHash": tx_hash.hex()}), 200
+        return jsonify({"status": "User enrolled", "txHash": tx_hash.hex(),"feature vector":encrypted_template}), 200
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        return {"error": str(e)}, 400
 
 # Route 2: Authenticate User with UID and query template
 @app.route('/authenticate', methods=['POST'])
@@ -324,18 +321,21 @@ def authenticate_user():
 
         processed_image = preprocess_image(image)
         feature_vector = extract_feature(processed_image)
+        print("Feature Vector auth :", feature_vector.tolist())
 
         is_enrolled, encrypted_stored_template = contract.functions.authenticateUser(uid).call()
 
         if not is_enrolled:
             return jsonify({"authenticationResult": "User does not exist"}), 400
-
+        print("encrypted_stored_template:", encrypted_stored_template)
         stored_feature_bytes = decrypt_aes(encrypted_stored_template)  # Decrypt bytes
-        stored_feature_vector = bytes_to_float_vector(stored_feature_bytes)  # Convert to float vector
-
+        stored_feature_vector = bytes_to_float_vector(stored_feature_bytes) 
+         # Convert to float vector
+        print("stored_feature_bytes:", stored_feature_bytes)
+        print("stored_feature_vector:", stored_feature_vector.tolist()) 
         similarity_score = np.dot(feature_vector, stored_feature_vector) / (np.linalg.norm(feature_vector) * np.linalg.norm(stored_feature_vector)) * 100
         print("Similarity score:", similarity_score)
-        if similarity_score >= 95:
+        if similarity_score >= 92:
             return jsonify({"authenticationResult": "User authenticated successfully"}), 200
         else:
             return jsonify({"authenticationResult": "Authentication failed"}), 400
