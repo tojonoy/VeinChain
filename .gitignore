@@ -1,1 +1,6 @@
 .vercel
+.env
+auth.py
+auth2.py
+fill.py
+node_modules

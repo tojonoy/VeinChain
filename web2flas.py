@@ -16,14 +16,16 @@ import os
 import time
 from flask_cors import CORS
 ssl._create_default_https_context = ssl._create_unverified_context
-
+import cv2
 # Run the function
+from dotenv import load_dotenv
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)  
 swagger=Swagger(app)
 # Connect to Ganache (or another Ethereum node)
-ganache_url = "http://localhost:7545"  # Ganache default URL
+ganache_url = os.getenv("WEB3_PROVIDER")  # Ganache default URL
 web3 = Web3(Web3.HTTPProvider(ganache_url))
 
 # Check if connected to the network
@@ -148,21 +150,15 @@ contract_abi = json.loads('''
     }
   ]''')
 
-contract_address = "0xdA10894d819E8d1EfC96090aa69896D5Fa47De61"  # Replace with your contract address
+contract_address = os.getenv("CONTRACT_ADDRESS")  # Replace with your contract address
 contract = web3.eth.contract(address=contract_address, abi=contract_abi)
 
 # Set up your account and private key
-account = "0xb8272E3BAb9e740f74Cf688c77E952De52fCd512"  
+account = os.getenv("ACCOUNT")
 
-# Set the private key (for signing transactions)
-private_key = "0x70002d6af37bc76a698abd8f1e402f26744c1822daa0395ba69975817e5714eb"  # Replace with your private key from Ganache
-
-aes_key = bytes.fromhex('603deb1015ca71be2b73aef0857d7781f19bff5a1b6a9d82e5a308d6d44323b1')
-aes_iv = bytes.fromhex('000102030405060708090a0b0c0d0e0f')
-def float_to_fixed(value, scale=10**6):
-    return int(value * scale)
-
-key = [0xAB] * 128  # XOR encryption key
+private_key = os.getenv("PRIVATE_KEY")  # Replace with your private key
+aes_key = bytes.fromhex(os.getenv("AES_KEY"))
+aes_iv = bytes.fromhex(os.getenv("AES_IV"))
 
 def xor_encrypt(data, key):
     scaled_data = np.array(data, dtype=np.uint)  # Enforce 8-bit integers
@@ -187,13 +183,39 @@ def decrypt_aes(encrypted_data):
     cipher = AES.new(aes_key, AES.MODE_CBC, aes_iv)
     decrypted = unpad(cipher.decrypt(bytes.fromhex(encrypted_data)), AES.block_size)
     return decrypted
-def preprocess_image(image, box=(280, 140, 410, 500), width=128, height=128):
+def preprocess_image1(image, box=(280, 140, 410, 500), width=128, height=128):
     crop = image.crop(box)
     crop = crop.rotate(90, expand=True)
     crop = crop.resize((width, height))
     
     img_array = np.asarray(crop, dtype=np.uint8)  # Use uint8 (less memory than float32)
     clahe_img = equalize_adapthist(img_array, clip_limit=0.02)  # Reduce clip_limit
+    
+    return clahe_img
+
+
+def preprocess_image(image, box=(280, 120, 490, 290), width=128, height=128):
+    # Load image
+    # Resize to 640x480
+    
+    # Crop the region (80,170) to (450,290)
+    crop = image.crop(box)
+    
+    # Rotate 90 degrees
+    crop = crop.rotate(90, expand=True)
+    
+    # Resize to 128x128
+    crop = crop.resize((width, height))
+    
+    # Convert to numpy array
+    img_array = np.asarray(crop, dtype=np.uint8)  
+    
+    # Convert to grayscale
+    gray_img = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+    
+    # Apply CLAHE
+    clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
+    clahe_img = clahe.apply(gray_img)
     
     return clahe_img
 
@@ -353,7 +375,7 @@ def authenticate_user():
         print("Similarity score:", similarity_score)
         #get_memory_usage()
         elapsed_time = time.time() - start_time
-        if similarity_score >= 90.0:
+        if similarity_score >= 86:
             return jsonify({"authenticationResult": f"User:{uid} authenticated successfully","time": f"{elapsed_time:.4f} seconds",
             "gasUsed": gas_estimate}), 200
         else:

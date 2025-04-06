@@ -9,3 +9,6 @@ torch
 torchvision
 gunicorn
 flask-cors
+os
+opencv-python
+python-dotenv

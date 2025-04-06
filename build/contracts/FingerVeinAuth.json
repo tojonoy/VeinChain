@@ -5593,12 +5593,12 @@
     "5777": {
       "events": {},
       "links": {},
-      "address": "0xc9952216C577bd9BBB47b8dE11AA18Cb5Df2FB8a",
-      "transactionHash": "0xbf47001d180a00e76927860c6b0fcd46af5e6fb44bcb3b54d6017b22f494f308"
+      "address": "0xdA10894d819E8d1EfC96090aa69896D5Fa47De61",
+      "transactionHash": "0x4449c82f6cf32e9cdbbf5284e2fa369da17a721c41475580d14e7057efd31be5"
     }
   },
   "schemaVersion": "3.4.16",
-  "updatedAt": "2025-03-18T06:55:25.623Z",
+  "updatedAt": "2025-04-03T16:33:47.575Z",
   "networkType": "ethereum",
   "devdoc": {
     "kind": "dev",
